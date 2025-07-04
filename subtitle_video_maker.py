@@ -2,60 +2,61 @@ import os
 from moviepy.editor import *
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+import re
 
 def create_text_video(script_text, background_image_path, output_path="output_video.mp4"):
     """
-    创建一个视频，逐句显示文字，背景为指定图片
+    Create a video that displays text segments separated by commas with a background image
     
-    参数:
-    script_text: 要显示的文字内容（字符串）
-    background_image_path: 背景图片路径
-    output_path: 输出视频路径
+    Args:
+    script_text: Text content to display (string)
+    background_image_path: Path to background image
+    output_path: Output video file path
     """
     
-    # 设置视频参数
+    # Set video parameters
     video_width = 1280
     video_height = 720
     fps = 24
-    sentence_duration = 3  # 每句话显示3秒
+    segment_duration = 2  # Display each segment for 2 seconds
     
-    # 分割文字为句子
-    sentences = [s.strip() for s in script_text.split('。') if s.strip()]
-    if not sentences:
-        sentences = [s.strip() for s in script_text.split('.') if s.strip()]
+    # Split text by commas
+    segments = split_by_comma(script_text)
     
-    print(f"共有 {len(sentences)} 句话")
+    print(f"Total segments: {len(segments)}")
+    for i, segment in enumerate(segments):
+        print(f"Segment {i+1}: {segment}")
     
-    # 加载背景图片
+    # Load background image
     try:
         background = Image.open(background_image_path)
-        # 调整背景图片大小
+        # Resize background image
         background = background.resize((video_width, video_height), Image.Resampling.LANCZOS)
         background_array = np.array(background)
     except Exception as e:
-        print(f"无法加载背景图片: {e}")
-        # 如果图片加载失败，创建纯色背景
+        print(f"Cannot load background image: {e}")
+        # If image loading fails, create a solid color background
         background_array = np.full((video_height, video_width, 3), [50, 50, 50], dtype=np.uint8)
     
-    # 创建视频片段列表
+    # Create video clip list
     clips = []
     
-    for i, sentence in enumerate(sentences):
-        print(f"处理第 {i+1} 句: {sentence[:30]}...")
+    for i, segment in enumerate(segments):
+        print(f"Processing segment {i+1}: {segment[:30]}...")
         
-        # 创建文字图片
-        text_clip = create_text_clip(sentence, background_array, video_width, video_height)
+        # Create text clip
+        text_clip = create_text_clip(segment, background_array, video_width, video_height)
         
-        # 设置显示时间
-        text_clip = text_clip.set_duration(sentence_duration)
+        # Set display duration
+        text_clip = text_clip.set_duration(segment_duration)
         
         clips.append(text_clip)
     
-    # 合并所有片段
+    # Concatenate all clips
     final_video = concatenate_videoclips(clips)
     
-    # 导出视频
-    print("开始导出视频...")
+    # Export video
+    print("Starting video export...")
     final_video.write_videofile(
         output_path,
         fps=fps,
@@ -63,37 +64,68 @@ def create_text_video(script_text, background_image_path, output_path="output_vi
         audio_codec='aac'
     )
     
-    print(f"视频已保存到: {output_path}")
+    print(f"Video saved to: {output_path}")
     return output_path
+
+def split_by_comma(text):
+    """
+    Split text by commas, supports both English and Chinese punctuation
+    """
+    # Clean text
+    text = text.strip()
+    
+    # Use regex to split, supporting both English and Chinese commas and periods
+    # Preserve delimiters
+    segments = re.split(r'([,，。.])', text)
+    
+    # Recombine to ensure each segment includes its following punctuation
+    result = []
+    current_segment = ""
+    
+    for i, part in enumerate(segments):
+        if part.strip():  # Skip empty strings
+            if part in ',，。.':  # If it's a delimiter
+                if current_segment:
+                    current_segment += part
+                    result.append(current_segment.strip())
+                    current_segment = ""
+            else:  # If it's text content
+                current_segment += part
+    
+    # Handle the last segment (may not have punctuation)
+    if current_segment.strip():
+        result.append(current_segment.strip())
+    
+    # Filter out empty segments or segments with only punctuation
+    result = [seg for seg in result if seg and not seg in ',，。.']
+    
+    return result
 
 def create_text_clip(text, background_array, width, height):
     """
-    创建单个文字片段
+    Create a single text clip with background
     """
-    # 复制背景
+    # Copy background
     frame = background_array.copy()
     
-    # 转换为PIL图像以便添加文字
+    # Convert to PIL image for text rendering
     img = Image.fromarray(frame)
     draw = ImageDraw.Draw(img)
     
-    # 设置字体（你可能需要调整字体路径）
+    # Set font
     try:
-        # 尝试使用系统字体
         font_size = 48
         font = ImageFont.truetype("arial.ttf", font_size)
     except:
         try:
-            # 如果Arial不可用，尝试其他字体
-            font = ImageFont.truetype("simhei.ttf", font_size)  # 黑体
+            font = ImageFont.truetype("simhei.ttf", font_size)
         except:
-            # 使用默认字体
             font = ImageFont.load_default()
     
-    # 文字换行处理
+    # Text wrapping
     wrapped_text = wrap_text(text, font, width - 100)
     
-    # 计算文字位置（居中）
+    # Calculate text position (center alignment)
     text_bbox = draw.multiline_textbbox((0, 0), wrapped_text, font=font)
     text_width = text_bbox[2] - text_bbox[0]
     text_height = text_bbox[3] - text_bbox[1]
@@ -101,25 +133,25 @@ def create_text_clip(text, background_array, width, height):
     x = (width - text_width) // 2
     y = (height - text_height) // 2
     
-    # 添加文字阴影
+    # Add text shadow
     shadow_offset = 2
     draw.multiline_text((x + shadow_offset, y + shadow_offset), wrapped_text, 
                        font=font, fill=(0, 0, 0, 128), align='center')
     
-    # 添加主文字
+    # Add main text
     draw.multiline_text((x, y), wrapped_text, font=font, fill=(255, 255, 255), align='center')
     
-    # 转换回numpy数组
+    # Convert back to numpy array
     frame_with_text = np.array(img)
     
-    # 创建moviepy的ImageClip
+    # Create moviepy ImageClip
     clip = ImageClip(frame_with_text, duration=1)
     
     return clip
 
 def wrap_text(text, font, max_width):
     """
-    文字换行处理
+    Text wrapping functionality
     """
     lines = []
     words = text.split()
@@ -127,7 +159,7 @@ def wrap_text(text, font, max_width):
     
     for word in words:
         test_line = ' '.join(current_line + [word])
-        # 创建临时Image来测试文字宽度
+        # Create temporary Image to test text width
         temp_img = Image.new('RGB', (1, 1))
         temp_draw = ImageDraw.Draw(temp_img)
         bbox = temp_draw.textbbox((0, 0), test_line, font=font)
@@ -147,41 +179,109 @@ def wrap_text(text, font, max_width):
     
     return '\n'.join(lines)
 
-# 示例使用
+def create_progressive_text_video(script_text, background_image_path, output_path="progressive_video.mp4"):
+    """
+    Create a video with progressive text display, where each frame shows all content up to the current comma
+    """
+    # Set video parameters
+    video_width = 1280
+    video_height = 720
+    fps = 24
+    segment_duration = 2
+    
+    # Split text by commas
+    segments = split_by_comma(script_text)
+    
+    # Create cumulative display text list
+    progressive_texts = []
+    accumulated_text = ""
+    
+    for segment in segments:
+        if accumulated_text:
+            accumulated_text += " " + segment
+        else:
+            accumulated_text = segment
+        progressive_texts.append(accumulated_text)
+    
+    print(f"Progressive display stages: {len(progressive_texts)}")
+    
+    # Load background image
+    try:
+        background = Image.open(background_image_path)
+        background = background.resize((video_width, video_height), Image.Resampling.LANCZOS)
+        background_array = np.array(background)
+    except Exception as e:
+        print(f"Cannot load background image: {e}")
+        background_array = np.full((video_height, video_width, 3), [50, 50, 50], dtype=np.uint8)
+    
+    # Create video clip list
+    clips = []
+    
+    for i, text in enumerate(progressive_texts):
+        print(f"Processing stage {i+1}: {text[:50]}...")
+        
+        # Create text clip
+        text_clip = create_text_clip(text, background_array, video_width, video_height)
+        text_clip = text_clip.set_duration(segment_duration)
+        
+        clips.append(text_clip)
+    
+    # Concatenate all clips
+    final_video = concatenate_videoclips(clips)
+    
+    # Export video
+    print("Starting progressive video export...")
+    final_video.write_videofile(
+        output_path,
+        fps=fps,
+        codec='libx264',
+        audio_codec='aac'
+    )
+    
+    print(f"Progressive video saved to: {output_path}")
+    return output_path
+
+# Example usage
 if __name__ == "__main__":
-    # 示例文字内容
+    # Sample text content with comma-separated segments
     sample_script = """
-    欢迎来到我们的视频演示。这是第一句话。
-    现在我们展示第二句话的效果。
-    每句话都会在屏幕上停留几秒钟。
-    背景图片可以是任何你喜欢的图片。
-    这个程序可以轻松地创建文字视频。
+    Welcome to our video demonstration, this is a great tool, that can help you create professional video content.
+    Now let's look at the first feature, text will be displayed by comma segments, each part will appear separately.
+    Next we'll show the second feature, background images can be customized, text will be automatically centered.
+    Finally, thank you for watching, hope this tool is helpful to you, thanks!
     """
     
-    # 背景图片路径（请替换为你的图片路径）
-    background_path = "background.jpg"  # 请确保这个文件存在
+    # Background image path
+    background_path = "background.jpg"
     
-    # 如果没有背景图片，创建一个示例图片
+    # Create sample background image if it doesn't exist
     if not os.path.exists(background_path):
-        print("创建示例背景图片...")
-        # 创建一个渐变背景
+        print("Creating sample background image...")
         img = Image.new('RGB', (1280, 720), color=(70, 130, 180))
         draw = ImageDraw.Draw(img)
         
-        # 添加一些装饰性图形
+        # Add some decorative graphics
         for i in range(0, 1280, 100):
             for j in range(0, 720, 100):
                 color = (70 + i//20, 130 + j//20, 180 + (i+j)//40)
                 draw.rectangle([i, j, i+50, j+50], fill=color)
         
         img.save(background_path)
-        print(f"示例背景图片已创建: {background_path}")
+        print(f"Sample background image created: {background_path}")
     
-    # 创建视频
+    # Create both types of videos
     try:
-        output_file = create_text_video(sample_script, background_path, "my_text_video.mp4")
-        print(f"视频创建成功！输出文件: {output_file}")
+        print("=" * 50)
+        print("Creating comma-split video (each comma segment displayed separately)")
+        output_file1 = create_text_video(sample_script, background_path, "comma_split_video.mp4")
+        print(f"Comma-split video created successfully! Output file: {output_file1}")
+        
+        print("=" * 50)
+        print("Creating progressive video (cumulative display up to current comma)")
+        output_file2 = create_progressive_text_video(sample_script, background_path, "progressive_video.mp4")
+        print(f"Progressive video created successfully! Output file: {output_file2}")
+        
     except Exception as e:
-        print(f"创建视频时出错: {e}")
-        print("请确保安装了所需的依赖包:")
+        print(f"Error creating video: {e}")
+        print("Please ensure you have installed the required dependencies:")
         print("pip install moviepy pillow numpy")
